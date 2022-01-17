@@ -1,9 +1,18 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Created on Mon Jan 17 16:07:00 2022
+@author: Hanyu Zhang
+"""
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 
+
 class Platoon:
+    """platoon object"""
     def __init__(self, n, k, cav_info, hdv_info, columnName, ite_max_u=100, ite_max_lambda=3):
+        """constructor for the Platoon class"""
         self.hdv = hdv_info
         self.n = n # platoon CAV number
         self.N = self.n + 1  # platoon vehicle number
@@ -12,12 +21,13 @@ class Platoon:
         self.u = np.zeros(n) # platoon MPC input: acceleration at current step k
         self.ite_max_u = ite_max_u
         self.ite_max_l = ite_max_lambda
-
+        """call initialize_control_variable function to initialize iteration variables 
+            and initialize trajectory DataFrame"""
         self.initialize_control_variables(k)
-        #self.calculate_ite_state()
         self.trajectory = pd.DataFrame(columns=columnName)  #output dataframe
 
     def initialize_control_variables(self, k):
+        """initialize iteration_varibles for distributed optimization"""
         # self.k = k  # current time step
         self.x_hdv = self.hdv[0][k]
         self.v_hdv = self.hdv[1][k]
@@ -39,6 +49,7 @@ class Platoon:
         self.dual_stop = False
 
     def mpc_algorithm(self, k):
+        """start mpc control for current time step"""
         self.calculate_ite_state()
         while self.ite_l < self.ite_max_l and not self.dual_stop:
             # print(f"ite_lambda:{self.ite_l}")
@@ -54,6 +65,7 @@ class Platoon:
         self.update_state(k)
 
     def compute_primal(self):
+        """compute and store the primal update for the distributed optimization algorithm"""
         self.ite_u += 1
         self.compute_gradient()
         self.u_ite_dir[self.ite_l][self.ite_u] = - np.dot(np.linalg.inv(KKT), self.gradient_ite[self.ite_l][self.ite_u]) # np.linalg.inv(KKT)
@@ -68,6 +80,7 @@ class Platoon:
         self.calculate_ite_state()
 
     def calculate_ite_state(self):
+        """calculate iteration state of the CAVs"""
         self.v_ite[self.ite_l][self.ite_u] = self.v[:] + tau * self.u_ite[self.ite_l][self.ite_u]  # cavs' next velocity
         self.x_ite[self.ite_l][self.ite_u] = self.x[:] + tau * self.v[:] + tau**2 /2 * self.u_ite[self.ite_l][self.ite_u] # cavs' next location
         self.zv_ite[self.ite_l][self.ite_u][0] = self.v_hdv + tau * self.u_hdv - self.v_ite[self.ite_l][self.ite_u][0] # hdv - first CAV
@@ -90,16 +103,23 @@ class Platoon:
                                                          tau * self.zv_ite[self.ite_l][self.ite_u-1][n-1]*beta[n-1]
 
     def check_primal_stop(self):
+        """check if the primal can stop or not"""
         for i in range(self.n):
             if abs(self.u_ite[self.ite_l][self.ite_u][i] - self.u_ite[self.ite_l][self.ite_u - 1][i]) > 0.01:
                 return False
         return True
 
     def compute_dual(self):
+        """compute and store the dual update for the distributed optimization algorithm"""
         self.ite_l += 1
-        self.l_ite[self.ite_l] = self.l_ite[self.ite_l - 1] + 1
+
+        for i in range(1, self.n):
+            gap = self.x_ite[self.ite_l][self.ite_u][i-1] - self.x_ite[self.ite_l][self.ite_u][i]\
+                  - (L + tau * self.v_ite[self.ite_l][self.ite_u][i])
+            self.l_ite[self.ite_l][i] = self.l_ite[self.ite_l - 1][i] + 0.01 * min(gap, 0)
 
     def check_dual_stop(self):
+        """check if dual algorithm can stop or not"""
         for i in range(1, self.n):
             if self.x_ite[self.ite_l][self.ite_u][i-1] - self.x_ite[self.ite_l][self.ite_u][i] \
                     < L + tau * self.v_ite[self.ite_l][self.ite_u][i]:
@@ -107,6 +127,7 @@ class Platoon:
         return True
 
     def update_state(self, k):
+        """update the MPC state to next time step and record trajectory at the same time"""
         self.u = self.u_ite[self.dual_idx][self.primal_idx]
         self.record_trajectory(k)
 
@@ -115,8 +136,8 @@ class Platoon:
         self.u = np.zeros(self.n)  # prev platoon MPC input: acceleration
         self.initialize_control_variables(k+1)
 
-
     def record_trajectory(self, k):
+        """record trajectory to the pandas dataframe"""
         cur_df = {}
         cur_df["hdv_x"] = self.hdv[0][k]
         cur_df["hdv_v"] = self.hdv[1][k]
@@ -143,6 +164,7 @@ class Platoon:
         self.trajectory = self.trajectory.append(cur_df, ignore_index = True)
 
 def output_to_plot():
+    """write output plots to see the platoon performance"""
     global i
     """Write the output in excel and figures"""
     # platoon.trajectory.to_excel("output.xlsx")
@@ -188,6 +210,37 @@ def output_to_plot():
     plt.show()
 
 
+"""Simulated HDV acceleration/deceleration data"""
+def simulate_hdv_trajectory():
+    global hdv
+    hdv = np.zeros((3, T))  # (x, v, u)
+    for t in range(10):
+        hdv[2][t] = 1
+    for t in range(10, 20):
+        hdv[2][t] = 0
+    for t in range(20, 30):
+        hdv[2][t] = -2
+    for t in range(30, 35):
+        hdv[2][t] = 3
+    for t in range(35, 40):
+        hdv[2][t] = -3
+    for t in range(40, T):
+        hdv[2][t] = 0
+    hdv[1][0] = init_vel  # initial velocity = 20m/s
+    """Note the dynamics be: x(t) = x(t-1) + tau*v(t-1) + tau^2/2*u(t)"""
+    for t in range(1, T):
+        hdv[0][t] = hdv[0][t - 1] + tau * hdv[1][t - 1] + tau ** 2 / 2 * hdv[2][t - 1]
+        hdv[1][t] = hdv[1][t - 1] + tau * hdv[2][t - 1]
+
+def set_platoon_initial_info():
+    global cav_info, columnName, i
+    """platoon initial information data: first is one HDV, then follow n many CAVs"""
+    cav_info = [[_ * (-sd) for _ in range(1, n + 1)], [init_vel for _ in range(1, n + 1)]]
+    columnName = ["hdv_x", "hdv_v", "hdv_u"]  # , "iteration_u", "iteration_lambda"
+    for i in range(1, n + 1):
+        columnName += [f"cav{i}_x", f"cav{i}_s", f"cav{i}_v", f"cav{i}_u", f"cav{i}_u_ite", f"cav{i}_l_ite"]
+
+
 """Parameter settings"""
 n = 8
 T = 50
@@ -207,42 +260,15 @@ hessian = [((alpha[i] + alpha[i + 1]) * (tau ** 2 / 2) ** 2 + tau ** 2 * (1 + be
 hessian.append(alpha[n-1] * (tau ** 2 / 2) ** 2 + tau ** 2 + beta[n-1] * tau ** 2)
 KKT = np.diag(hessian)
 
-"""Simulated HDV acceleration/deceleration data"""
-hdv = np.zeros((3, T)) # (x, v, u)
-
-for t in range(10):
-    hdv[2][t] = 1
-for t in range(10, 20):
-    hdv[2][t] = 0
-for t in range(20, 30):
-    hdv[2][t] = -2
-for t in range(30, 35):
-    hdv[2][t] = 3
-for t in range(35, 40):
-    hdv[2][t] = -3
-for t in range(40, T):
-    hdv[2][t] = 0
-
-hdv[1][0] = init_vel # initial velocity = 20m/s
-"""Note the dynamics be: x(t) = x(t-1) + tau*v(t-1) + tau^2/2*u(t)"""
-for t in range(1, T):
-    hdv[0][t] = hdv[0][t-1] + tau * hdv[1][t-1] + tau ** 2 / 2 * hdv[2][t-1]
-    hdv[1][t] = hdv[1][t-1] + tau * hdv[2][t-1]
-
-"""platoon initial information data: first is one HDV, then follow n many CAVs"""
-cav_info = [[_ * (-sd) for _ in range(1, n+1)], [init_vel for _ in range(1, n+1)]]
-
-columnName = ["hdv_x", "hdv_v", "hdv_u"] #, "iteration_u", "iteration_lambda"
-for i in range(1, n+1):
-    columnName += [f"cav{i}_x", f"cav{i}_s", f"cav{i}_v", f"cav{i}_u", f"cav{i}_u_ite", f"cav{i}_l_ite"]
-
+"""set up hdv/cav and generate platoon instance"""
+simulate_hdv_trajectory()
+set_platoon_initial_info()
 platoon = Platoon(n=n, k=0, cav_info=cav_info, hdv_info=hdv, columnName=columnName)
-trajectory = pd.DataFrame(columns=columnName)
-
 
 """Run the platoon controller"""
 for k in range(0, T-1):
     platoon.mpc_algorithm(k)
 platoon.trajectory["time_step"] = platoon.trajectory.index
 
-# output_to_plot()
+"""plot to see performance"""
+output_to_plot()
