@@ -1,7 +1,6 @@
 # System Optimal Vehicle Platooning Generator
 
-### This is the python version of the connected and autonomous vehicle (CAV) platooning algorithm 
-### using model predictive control (MPC) and distributed optimization.
+### This is the python version of the connected and autonomous vehicle (CAV) platooning algorithm using model predictive control (MPC) and distributed optimization.
 See the publications for reference for this project
 
 
